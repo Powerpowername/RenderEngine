@@ -141,7 +141,7 @@ float4 PS(VertexOut pin) : SV_Target
             // 累加统计矩
             m1 += neighbor;
             m2 += neighbor * neighbor;//计算方差使用
-            // 更新最近深度及对应像素位置
+            // 更新最近深度及对应像素位置，此处使用的是离屏最近的信息而不是知乎文章中3*3区域内运动最剧烈的向量
             float currentDepth = depth[pixelPosition].r;
             if (currentDepth < closestDepth) {
                 closestDepth = currentDepth;
@@ -149,7 +149,7 @@ float4 PS(VertexOut pin) : SV_Target
             }
         }
     }
-    // *0.5的目的是将速度向量映射到[0, 1]，*-0.5是将y轴翻转，因为NDC空间中的坐标是向上的，UV中是向下的
+    // *0.5的目的是将速度向量映射到[-1, 1]，*-0.5是将y轴翻转，因为NDC空间中的坐标是向上的，UV中是向下的
     float2 motionVector = velocity[closestDepthPixelPosition].xy * float2(0.5, -0.5);
     float2 historyTexCoord = pin.texcoord - motionVector;
 
@@ -159,14 +159,14 @@ float4 PS(VertexOut pin) : SV_Target
         return float4(sourceSample, 1.0);
 
     float3 historySample = SampleTextureCatmullRom(history, g_SamplerLinearWrap, historyTexCoord, float2(width, height)).rgb;
-    float invSampleCount = 1.0 / 9.0;
+    float invSampleCount = 1.0 / 9.0;//9个样本
     //采用正态分布的思想，落在1σ的范围外，可以解决闪烁问题，但处理鬼影效果较弱
     float gamma = 1.0;
     float3 mu = m1 * invSampleCount;
     float3 sigma = sqrt(abs((m2 * invSampleCount) - (mu * mu)));
     float3 minc = mu - gamma * sigma;
     float3 maxc = mu + gamma * sigma;
-    //此处实际上没有用上minc和maxc
+    //此处实际上没有用上minc和maxc，用上可以剔除闪烁
     historySample = clamp(historySample, neighborhoodMin, neighborhoodMax);
     
     float sourceWeight = 0.05;
