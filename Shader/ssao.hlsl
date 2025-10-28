@@ -1,5 +1,8 @@
 #include "utils.hlsl"
-
+/*
+目前观察到这个纹理就是用来计算环境遮蔽因子的，结果会渲染到SSAO纹理中，
+而不会直接输出颜色
+*/
 cbuffer cbSsao : register(b0)
 {
     float4x4 gProj;           // 投影矩阵
@@ -106,8 +109,22 @@ float NdcDepthToViewDepth(float z_ndc)
     return viewZ;
 }
 
+// 像素着色器函数
+float4 PS(VertexOut pin) : SV_Target  // 输出到渲染目标
+{
 
+    // 获取当前像素的法线向量（视图空间）并进行归一化，SampleLevel可指定mipmap层级，而Sample不可以
+    float3 N = normalize(gNormalMap.SampleLevel(gsamPointClamp, pin.TexCoord, 0.0f).xyz);
+    
+    // 获取当前像素的深度值并转换到视图空间
+    float pz = gDepthMap.SampleLevel(gsamDepthMap, pin.TexCoord, 0.0f).r;
+    pz = NdcDepthToViewDepth(pz);
 
+    // 计算切空间基向量S和T
+    float3 S, T;
+    ComputeBasisVectors(N, S, T);
+
+}
 
 // #include "utils.hlsl"  // 引入工具函数库，包含采样、坐标转换等辅助函数
 
