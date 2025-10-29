@@ -76,7 +76,7 @@ VertexOut VS(uint vid : SV_VertexID)  // 输入为顶点ID
 
     // 使用逆投影矩阵将NDC坐标转换回视图空间
     float4 ph = mul(vout.PositionH, gInvProj);
-    vout.PositionV = ph.xyz / ph.w;  // 透视除法，得到正确的视图空间坐标，齐次坐标
+    vout.PositionV = ph.xyz / ph.w;  // 透视除法，得到正确的视图空间坐标，齐次坐标，齐次坐标才是正确的视图空间坐标
 
     return vout;  // 返回顶点着色器输出
 
@@ -123,6 +123,58 @@ float4 PS(VertexOut pin) : SV_Target  // 输出到渲染目标
     // 计算切空间基向量S和T
     float3 S, T;
     ComputeBasisVectors(N, S, T);
+
+    // 重建当前像素在视图空间中的完整3D位置
+    // 使用比例关系：p.z / pin.PositionV.z = 实际深度 / 顶点深度
+    // pin为视图空间中近平面上的点，所以会需要进行缩放转换到实际的位置当中
+    float3 p = (pz / pin.PositionV.z) * pin.PositionV;
+
+
+    float occlusionSum = 0.0f;  // 初始化遮蔽总和
+
+    // 循环采样NumSamples次
+    for (int i = 0; i < NumSamples; ++i)
+    {
+        // 使用Hammersley序列生成低差异的2D采样点
+        float2 uv = SampleHammersley(i, InvNumSamples);
+
+        // 在半球内采样并转换到视图空间
+        float3 offset = TangentToBasis(SampleHemisphere(uv.x, uv.y), N, S, T);
+
+        // 在当前点p周围生成采样点q，使用gOcclusionRadius控制范围
+        float3 q = p + gOcclusionRadius * offset;
+
+        // 将采样点q投影到屏幕空间
+        float4 projQ = mul(float4(q, 1.0f), gProjTex);
+        projQ /= projQ.w;  // 透视除法
+    
+        // 在深度纹理中查询采样点位置的实际深度值
+        float rz = gDepthMap.SampleLevel(gsamDepthMap, projQ.xy, 0.0f).r;
+        rz = NdcDepthToViewDepth(rz);  // 转换到视图空间
+
+
+        // 重建实际场景点r在视图空间中的位置
+        // 使用比例关系：r.z / q.z = 实际深度 / 采样点深度
+        // r 为实际场景中的位置
+        float3 r = (rz / q.z) * q;
+
+        // 计算深度差：正值表示r在p的前方
+        float distZ = p.z - r.z;
+
+        // 计算法线点积：衡量r相对于p表面的角度，max确保非负
+        float dp = max(dot(N, normalize(r - p)), 0.0f);
+
+        // 计算遮蔽贡献：综合考虑角度和距离因素
+        float occlusion = dp * OcclusionFunction(distZ);
+        occlusionSum += occlusion;  // 累加到总和
+    }
+
+    occlusionSum /= NumSamples;  // 求平均值
+    
+    float access = 1.0f - occlusionSum;  // 计算可及度（1 - 遮蔽度）
+    
+    // 使用幂函数增强对比度，使遮蔽效果更加明显
+    return saturate(pow(access, 6.0f));
 
 }
 
